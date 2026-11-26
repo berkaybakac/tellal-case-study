@@ -12,6 +12,18 @@
 
 Source code is private. This page describes the design and shows the real admin panel with test data.
 
+## Architecture at a glance
+
+| Part | Responsibility |
+|---|---|
+| `/v1` API (FastAPI) | Campaign-text and speech operations, keyed by client request ID; scoped keys per project |
+| Operation store (SQLite, write-locked transactions) | Idempotency, balance holds and debits, spending caps, attempt and cost records, audit |
+| Provider adapters | Claude for copy, ElevenLabs for speech, each behind two methods so a provider can be swapped by a new versioned profile |
+| Copy validator | Placeholder-only output, no digits in model words, banned phrases, length |
+| Admin panel (server-rendered) | Balances, customers, limits, keys, usage and costs, fleet; same write path as the API |
+| Fleet hub and release catalog | Kadans servers report through it; each customer is told the one release it should run |
+| Monitoring | Prometheus metrics, Grafana dashboards and alert rules for spend, balances and provider faults |
+
 ## How one announcement is made
 
 ```mermaid
@@ -34,7 +46,7 @@ flowchart LR
 
 *The owner-facing summary (test data): remaining characters per customer, this month's use and how long the balance lasts at the current pace, with a calm warning before one runs out.*
 
-## A model that cannot write a number
+## LLM guardrails: a model that cannot write a number
 
 A wrong price read aloud in a store is unacceptable, so the model is never asked for one.
 
@@ -45,21 +57,21 @@ A wrong price read aloud in a store is unacceptable, so the model is never asked
 - **Facts from the client.** Kadans sends only validated facts. Today-only, last-day and branch-exclusive openings are computed from ERP data, and restricted products are filtered out before any model call.
 - **Voice changes follow.** When the voice or provider changes, Kadans re-renders live announcements within budget while the old audio keeps playing.
 
-## Money safety for paid AI calls
+## Cost control and idempotency for paid AI calls
 
 - **Idempotent operations.** Every request carries a client request ID, checked against a stored payload hash. A replay returns the stored result without a provider call, and a concurrent duplicate shares the single call in flight. A timeout becomes "unknown", possibly billed, and allows only one more attempt.
 - **Fact-derived request IDs.** Kadans derives UUIDv5 request IDs from tenant, exact facts and profile, so one discount across many branches is written and spoken once.
 - **Prepaid ledger.** A hold is taken inside the claim transaction before any provider call and debited only on a durable, usable result; definite failures release it, and a settled failure can never be reopened by a late worker.
 - **Caps inside the transaction.** A kill switch, a daily cap, monthly provider budgets and per-customer limits all run inside the same write-locked transaction as the claim, so parallel requests cannot overshoot. Each hit is logged with cap, limit and estimate.
 
-## Built for more than one client
+## Multi-tenant platform: projects, scoped keys, versioned prompts
 
 - **Projects and scoped keys.** Customers own revocable API keys, stored only as digests and scoped to text or speech, inside projects that list the profiles their keys may use. Out-of-scope calls are refused before any record, hold or provider call.
 - **Versioned profiles.** Prompt, model and voice settings live in immutable, versioned profiles chosen per request; every output records the exact version and file hash, and a retry keeps the version chosen first.
 - **Model and voice by evaluation.** The production model and voice were chosen with a scripted side-by-side run over 20 sample campaigns through the same validator, measuring acceptance and cost per campaign, plus listening. The chosen profile accepted 20 of 20.
 - **One service, by decision.** Text and speech stay in one service; the recorded revisit condition is a speech queue that stays saturated or CPU that stays above 70%.
 
-## Admin panel and operations
+## Operations: admin panel, observability, deployment
 
 - **Admin panel.** Server-rendered FastAPI and Jinja2 pages with one write path shared with the API, separate API and panel hosts, CSRF tokens, and confirmation modals that state the resulting balance before money moves. Several named admins sign in with mandatory TOTP, replay refusal and per-admin lockout; every login and ledger entry is audited.
 - **Fleet view.** Every customer's servers, branches and players, faults first; a silent server shows red even if its last status said online, and the page says plainly when the hub cannot be reached.
