@@ -27,7 +27,8 @@ Source code is private. This page shows the real admin panel with test data and 
 ## How one announcement is made
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"diagramPadding": 40}}}%%
+flowchart TB
   C["Client sends verified facts"] --> T["Text operation<br/>replay check · spend limits · hold"]
   T --> L["Claude writes words around placeholders"]
   L --> V{"Validator: no digits,<br/>no banned phrases"}
